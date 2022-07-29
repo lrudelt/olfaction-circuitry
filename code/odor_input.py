@@ -241,6 +241,14 @@ class MBON():
             accuracy[t] = abs(pred[t] - valences[t])
         return np.mean(accuracy)
 
+    def train_converge(self, KC_zs, valences, error=0.05):
+        prior_acc = 0
+        while True:
+            self.train(KC_zs, valences)
+            new_acc = self.test(KC_zs, valences)
+            if (abs(new_acc - prior_acc))/prior_acc < error:
+                break
+
 class Predictive_MBON(MBON):
     
     def __init__(self, s):
@@ -258,7 +266,7 @@ class Predictive_MBON(MBON):
         eta_learning = self.settings["learning_rate"]
         self.weights[0] += eta_learning * (self.compute_DAN_input(valence, KC_z) - self.compute_valence(KC_z)) * KC_z
         ## the problem is this assumes same number of non-zero KC_zs for each odor (since paper has 1 odor, 1 KC)
-        ## bc otherwise no way to normalize weights
+        ## bc otherwise no way to normalize weights and therefore valences. But could just use sign ig?
     
 class Approach_Avoid(MBON):
     def __init__(self, s):

@@ -21,13 +21,14 @@ odor_log_interval = 50
 folder_name = path + "simulations/220726"
 project_name = "samuel2019"
 odor_file = path + 'odor_data/samuel2019_-4_raw_rounded.csv'
-
+specificity = n_neuron/n_odor
 ## Define the settings dictionary from the standard one
 s = Settings()
 s.set('presentation_length', presentation_length) ## ms here since default dt is 1
 s.set('fade_fraction', 0.2)
 s.set('input_tau_inc', 50)
-s.set('rho', 0.001)
+firing_rate = specificity/(n_odor*s.kernel_tau)
+s.set('rho', firing_rate)
 s.set('dt', dt)
 s.set('n_odors', n_odor)
 s.set('n_ORN', n_ORN)
@@ -44,7 +45,7 @@ s.set('n_test_repeat', n_test_odor_repeats)
 s.input_selector = get_odor_rate
 s.odor_file = odor_file
 s.MBON_settings_dict = {"c": 10, "learning_rate": 0.000001}
-s.eta_bias = 0.0001
+s.eta_bias = 0.001
 s.set('update_interval', s.presentation_length*n_odor) ## for biases - needs to be at least as long as odor presentation time * num odors
 s.plasticity = Analytic_Simple()
 s.description = "High eta_bias, four runs for optimal, random with optimal F, measured, and random with measured F"
