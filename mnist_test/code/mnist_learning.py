@@ -1,5 +1,5 @@
 import sys
-sys.path.insert(1, '/data.nst/arana/olfaction_circuitry/')
+sys.path.insert(1, '/data.nst/lucas/MB_learning/')
 from classes import *
 from plotting import *
 from utils import *

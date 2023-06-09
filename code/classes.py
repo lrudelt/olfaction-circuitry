@@ -36,6 +36,7 @@ class Neuron():
 class Net():
     def __init__(self, s, seed=0):
         assert isinstance(s, Settings)
+        s.set_dt() #important! Transforms all variables with time dimension in units of dt
         self.n_stim = s.n_stim
         self.stim_x = np.zeros((self.n_stim, 1))
         self.kernel_length = s.kernel_length
@@ -51,7 +52,7 @@ class Net():
         self.neuron_spikes = np.zeros_like(self.neuron_psps, dtype=bool)
         self.recent_spikes = np.zeros((self.kernel_length + self.timestep_delay, self.n_neuron), dtype=bool)
         self.neuron_rates = np.zeros_like(self.neuron_psps) ## average spike rate per neuron per timestep, reset at each batch
-        self.neuron_biases = np.ones_like(self.neuron_psps)*np.log(1.0 / (1 - (s.rho*s.dt)) - 1.0)
+        self.neuron_biases = np.ones_like(self.neuron_psps)*np.log(1.0 / (1 - s.rho) - 1.0)
         self.decoder_matrix = np.zeros((self.n_stim, self.n_neuron))
         self.feedforward_weights = np.zeros((self.n_neuron, self.n_stim))
         self.recurrent_weights = np.zeros((self.n_neuron, self.n_stim, self.n_neuron))
@@ -93,7 +94,7 @@ class Net():
                 r[int(tim/l), t, :] = self.neuron_spikes
         return z, r
 
-    def run_net(self, inputs, test_inputs, s, update=True, decoder_only=False):
+    def run_net(self, inputs, test_inputs, s, update=True, decoder_only=False, homeostatic_bias=False):
         assert isinstance(s, Settings)
         select_input = s.input_selector
         l = s.presentation_length
@@ -108,7 +109,7 @@ class Net():
             self.log.t = time
             x = select_input(inputs, time, s)
             batch = time % s.update_interval == 0
-            self.step_net(x, s, update_batch=batch, update=update, decoder_only=decoder_only)
+            self.step_net(x, s, update_batch=batch, update=update, decoder_only=decoder_only, homeostatic_bias=homeostatic_bias)
             self.log.log_results(self, test_inputs, s)
         self.log.take_snapshot(self, test_inputs, s)
         self.log.write_status(s)
@@ -123,7 +124,7 @@ class Net():
     #     for neuron in range(self.n_neuron):
     #         self.neuron_psps[neuron] = self.neurons[neuron].get_psp()
     
-    def step_net(self, x_input, s, update_batch=False, update=True, decoder_only=False):
+    def step_net(self, x_input, s, update_batch=False, update=True, decoder_only=False, homeostatic_bias=False):
         self.stim_x = x_input
         inputs = self.calc_inputs()
         probability = 1/(1 + np.exp(-inputs))
@@ -132,7 +133,7 @@ class Net():
         self.recent_spikes[1:] = self.recent_spikes[:-1]
         self.recent_spikes[0] = self.neuron_spikes
         if update:
-            self.plasticity.update_net(self, s, update_batch, decoder_only=decoder_only)
+            self.plasticity.update_net(self, s, update_batch, decoder_only=decoder_only, homeostatic_bias=homeostatic_bias)
         self.neuron_psps = np.matmul(self.recent_spikes[self.timestep_delay:].T, self.kernel)
 
     def calc_inputs(self):
@@ -181,14 +182,17 @@ class Decoder():
 
 class OptimalDecoder(Decoder):
     def update_decoder(self, net, s):
-        eta = s.eta_decoder * s.dt
         z_col = net.neuron_psps.reshape((net.n_neuron, 1))
         dD = np.matmul(net.stim_x.reshape(-1, 1) - np.matmul(net.decoder_matrix, z_col), z_col.T)
-        net.decoder_matrix += eta * dD
+        net.decoder_matrix += s.eta_decoder * dD
+
+    def sparsify_decoder(self, net, s):
+        sum_over_i = np.sum(D, axis=0)
+
+
 
 class OptimalDecoderEfficient(Decoder):
     def update_decoder(self, net, s):
-        eta = s.eta_decoder * s.dt
         tau = s.kernel_tau
 
         t = net.log.t
@@ -202,7 +206,7 @@ class OptimalDecoderEfficient(Decoder):
         x_row = net.memory["last_x"].reshape((1, net.n_stim))
 
         dD = np.matmul((x_row.T * sum1) - (np.matmul(net.decoder_matrix, z_col) * sum2), z_col.T)
-        net.decoder_matrix += eta * dD
+        net.decoder_matrix += s.eta_decoder * dD
 
 
 class Plasticity():
@@ -225,34 +229,33 @@ class Plasticity():
         pass
 
     def update_bias(self, net, s):
-        eta = (s.update_interval*s.dt) * s.eta_bias
-        goalrate = s.rho * s.dt ## firing rate per timestep
+        eta = s.update_interval * s.eta_bias
+        goalrate = s.rho ## firing rate per timestep
         net.neuron_biases += eta * (goalrate - net.neuron_rates)
         #print(goalrate, net.neuron_rates)
         net.neuron_rates = np.zeros_like(net.neuron_psps)
 
 class Analytic_Simple(Plasticity):
 
-    def update_net(self, net, s, update_batch=False, decoder_only=False):
+    def update_net(self, net, s, update_batch=False, decoder_only=False, homeostatic_bias=False):
         if decoder_only:
             self.calculate_recurrent(net)
         else:
             self.update_feedforward(net, s)
             self.update_recurrent(net, s)
         self.decoder.update_decoder(net, s)
-        if update_batch:
-            self.update_bias(net, s)
+        if homeostatic_bias:
+            if update_batch:
+                self.update_bias(net, s)
 
     def update_feedforward(self, net, s):
-        eta = s.eta_feedforward * s.dt
         z_col = net.neuron_psps.reshape((net.n_neuron,1))
         x_row = net.stim_x.reshape((1, net.n_stim))
         dF = np.matmul(z_col, x_row - np.matmul(z_col.T, net.feedforward_weights))
-        net.feedforward_weights += eta * dF
+        net.feedforward_weights += s.eta_feedforward * dF
 
     def update_recurrent(self, net, s):
-        eta = s.eta_recurrent * s.dt
-        net.recurrent_weights -= eta * np.matmul(net.membrane_potentials.reshape((net.n_neuron,1)),
+        net.recurrent_weights -= s.eta_recurrent * np.matmul(net.membrane_potentials.reshape((net.n_neuron,1)),
                                                  net.neuron_psps.reshape((1, net.n_neuron)))
     
     def calculate_recurrent(self, net):
@@ -283,7 +286,6 @@ class Analytic_Efficient(Plasticity):
 
     def update_feedforward(self, net, s):
         ## Integrate learning rule over the time between last spike and current spike, making use of exponential kernel
-        eta = s.eta_feedforward * s.dt
         tau = s.kernel_tau
 
         t = net.log.t
@@ -296,11 +298,10 @@ class Analytic_Efficient(Plasticity):
         x_row = net.memory["last_x"].reshape((1, net.n_stim))
 
         dF = np.matmul(z_col, (x_row * sum1) - (np.matmul(z_col.T, net.feedforward_weights) * sum2))
-        net.feedforward_weights += eta * dF
+        net.feedforward_weights += s.eta_feedforward * dF
 
     def update_recurrent(self, net, s):
-        eta = s.eta_recurrent * s.dt
-        net.recurrent_weights -= eta * np.matmul(net.membrane_potentials.reshape((net.n_neuron, 1)),
+        net.recurrent_weights -= s.eta_recurrent * np.matmul(net.membrane_potentials.reshape((net.n_neuron, 1)),
                                                  net.neuron_psps.reshape((1, net.n_neuron)))
 
     def calculate_recurrent(self, net):
@@ -350,7 +351,7 @@ class Log():
 
     def log_results(self, net, test_inputs, s):
         interval = s.dynamic_log_interval
-        self.running_log["avg_firing_rate"] += np.average(net.neuron_spikes) / (interval*s.dt) ## contains mean firing rate (spikes per neuron per ms) across all neurons over interval
+        self.running_log["avg_firing_rate"] += np.average(net.neuron_spikes) / (interval*s.dt) * 1000 ## contains mean firing rate (spikes per neuron in Hz) across all neurons over interval
         if self.t % s.dynamic_sample_interval == 0:
             self.update_running_log(net, s)
         if self.t % interval == 0:
@@ -410,13 +411,12 @@ class Log():
 class Settings():
     def __init__(self):
         ## Timesteps
-        dt = 1  ## ms
-        presentation_length = 100  ## ms
-        self.dt = dt
-        self.timestep_delay = 1
+        self.dt = 1 ## ms
+        self.timestep_delay = 1 # in steps!
+        self.time_unit = "ms"
     
         ## Input dynamics
-        self.presentation_length = int(presentation_length/dt)  ## num steps
+        self.presentation_length = 100  ## ms 
         self.fade_fraction = 0.2  ## denotes fraction of presentation fading to next step
 
         ## Odor specific inputs
@@ -426,9 +426,9 @@ class Settings():
         ## Odor specific input dynamics
         self.input_adaptation = True
         self.input_baseline = True
-        self.input_tau_inc = int(100/dt) ## timesteps to reach peak firing
-        self.input_tau_off = int(200/dt) ## timescale in timesteps of decay after odor is switched off (during fade)
-        self.input_tau_adap = int(150/dt) ## timescale in timesteps of adaptation to adapted level after peak is hit
+        self.input_tau_inc = 100 ## time (in ms) to reach peak firing 
+        self.input_tau_off = 200 ## timescale (in ms) of decay after odor is switched off (during fade)
+        self.input_tau_adap = 150 ## timescale (in ms) of adaptation to adapted level after peak is hit
         self.input_adap_level = 0.5 ## fraction of peak firing level that input adapts to
         self.input_spiking_noise = False
         self.input_spiking_memory = True
@@ -444,9 +444,8 @@ class Settings():
 
         ## Neuronal dynamics
         ## set using set_dt to be implemented still
-        tau = 10  # time constant of PSP decay, 10ms
-        self.kernel_tau = tau / dt  # [step]
-        self.kernel_length = int(5 * tau / dt)
+        self.kernel_tau = 10  # time constant of PSP decay, 10ms
+        self.kernel_length = 5 * self.kernel_tau
         self.kernel = np.exp(-np.arange(self.kernel_length) / self.kernel_tau)
         # target firing rate across neurons (spikes/ms)
         self.rho = 0.02
@@ -460,23 +459,23 @@ class Settings():
         ## Plasticity rules
         self.plasticity = Plasticity
         self.learned_recurrent = True  ## Recurrence is learned or calculated from feedforward?
-        self.update_interval = 5  ## update interval in timesteps that batch updates are processed in
+        self.update_interval = 5  ## update interval (ms) that batch updates are processed in
 
         ## NN plasticity learning settings
-        self.eta_feedforward = 0.00006
-        self.eta_recurrent = 0.00006
-        self.eta_decoder = 0.0005
-        self.eta_bias = 0.00001
+        self.eta_feedforward = 0.00006 # 1/ms
+        self.eta_recurrent = 0.00006 #1/ms
+        self.eta_decoder = 0.0001 # 1/ms
+        self.eta_bias = 0.00001 # 1/ms
 
         ## Sigma annealing
         self.learned_sigma = False
-        self.eta_sigma = 0
+        self.eta_sigma = 0 # 1/ms
         self.fixed_final_sigma = self.initial_sigma
 
         ## Logging settings
-        self.dynamic_log_interval = 10000  ## stores dynamic variable averages every ___ timesteps; length of averaging window
-        self.dynamic_sample_interval = 5  # samples the dynamic variables of the net every ___ timesteps
-        self.snapshot_log_interval = 1  # saves only every ___ timestep in the snapshot to save space
+        self.dynamic_log_interval = 5000  ## stores dynamic variable averages every ___ ms; length of averaging window
+        self.dynamic_sample_interval = 2.5  # samples the dynamic variables of the net every ___ ms
+        self.snapshot_log_interval = self.dt  # saves only every ___ ms time point in the snapshot to save space
         self.dynamic_vars = [ #"mean_feedforward_weights", "mean_recurrent_weights", "neuron_biases",
                              "avg_firing_rate",  "test_decoder_loss"]
         self.dynamic_log_test_set = self.n_odors ## fraction of test inputs for snapshot used in dynamic log
@@ -491,21 +490,32 @@ class Settings():
 
 
     def set(self, key, value):
-        if key == 'dt':
-            self.set_dt(value)
-        else:
-            exec("self.%s = %s" % (key, value))
+        # if key == 'dt':
+        #     self.set_dt(value)
+        # else:
+        exec("self.%s = %s" % (key, value))
 
-    def set_dt(self, dt):
-        old = self.dt
-        self.dt = dt
-        self.presentation_length = int(self.presentation_length*old/dt)  ## num steps
-        self.input_tau_inc = int(self.input_tau_inc*old/dt)  ## num steps
-        self.input_tau_adap = int(self.input_tau_adap*old/dt)  ## num steps
-        self.input_tau_off = int(self.input_tau_off*old/dt)  ## num steps
-        self.kernel_tau = int(self.kernel_tau*old/dt)  # [step]
-        self.kernel_length = int(self.kernel_length*old/dt)
-        self.kernel = np.exp(-np.arange(self.kernel_length) / self.kernel_tau)
+    def set_dt(self):
+        if self.time_unit != "steps":
+            dt = self.dt
+            self.presentation_length = int(self.presentation_length/dt)  ## num steps
+            self.input_tau_inc = int(self.input_tau_inc/dt)  ## num steps
+            self.input_tau_adap = int(self.input_tau_adap/dt)  ## num steps
+            self.input_tau_off = int(self.input_tau_off/dt)  ## num steps
+            self.kernel_tau = int(self.kernel_tau/dt)  # [step]
+            self.kernel_length = int(self.kernel_length/dt)
+            self.kernel = np.exp(-np.arange(self.kernel_length) / self.kernel_tau)
+            self.eta_decoder =  self.eta_decoder * dt # [1/step]
+            self.eta_feedforward =  self.eta_feedforward * dt # [1/step]
+            self.eta_recurrent =  self.eta_recurrent * dt # [1/step]
+            self.eta_bias =  self.eta_bias * dt # [1/step]
+            self.eta_sigma = self.eta_sigma * dt # [1/step]
+            self.rho = self.rho * dt # transform to [1/steps]
+            self.dynamic_log_interval = int(self.dynamic_log_interval/dt)
+            self.dynamic_sample_interval = int(self.dynamic_sample_interval/dt)
+            self.snapshot_log_interval = int(self.snapshot_log_interval/dt)
+            self.update_interval = int(self.update_interval/dt)
+            self.time_unit = "steps" # indicate that all time variables are in units of steps
 
 """
 -   Param change dict not implemented

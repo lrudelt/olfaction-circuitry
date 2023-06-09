@@ -1,5 +1,5 @@
 import sys
-path = '/data.nst/arana/olfaction_circuitry/'
+path = '/data.nst/lucas/MB_learning/'
 if path not in sys.path:
     sys.path.insert(1, path)
 from classes import *

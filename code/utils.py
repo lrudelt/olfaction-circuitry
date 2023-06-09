@@ -24,7 +24,10 @@ def randomify_feedforward(F, shuffle=True, seed=0):
 
 def get_odor_rate(x, t, s):
     assert isinstance(s, Settings)
-    l = s.presentation_length
+    if s.time_unit == "ms":
+        l = int(s.presentation_length/s.dt)
+    elif s.time_unit == "steps":  
+        l = s.presentation_length  
     odor = int(t/l)
     timestep = t % l
     return x[odor, timestep, :]

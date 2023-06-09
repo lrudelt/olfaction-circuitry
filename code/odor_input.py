@@ -2,7 +2,7 @@ import sys
 from sklearn.model_selection import train_test_split
 
 from plotting import *
-path = '/data.nst/arana/olfaction_circuitry/'
+path = '/data.nst/lucas/MB_learning/'
 if path not in sys.path:
     sys.path.insert(1, path)
 from classes import *
@@ -133,6 +133,7 @@ def get_PN_dynamics(s, num_data=1000, seed=0, all_odors=False, return_odor_no=Fa
     Generates PN dynamics for a given number of odor presentations.
     """
     assert isinstance(s, Settings)
+    s.set_dt() # make sure that time units are in the right units after initialization
     PN_mean, b, odors = generate_odor_means(s, num_data=num_data, seed=seed, all_odors=all_odors)
     if s.input_baseline:
         base = b
