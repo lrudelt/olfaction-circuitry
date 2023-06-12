@@ -125,6 +125,8 @@ def PN_dynamics(PN_mean_rates, baseline, s):
                 for t2 in range(t-sample_interval, t):
                     spike_dyn[t2] = (1-(t2-t+sample_interval)/sample_interval)*spike_dyn[t-sample_interval] + (t2-t+sample_interval)/sample_interval*spike_dyn[t]
         return spike_dyn                
+    elif s.input_noise:
+        rate_dyn = rate_dyn + np.amax(np.random.normal(0,s.noise_level),0) 
     else:
         return rate_dyn
 

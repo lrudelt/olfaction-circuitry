@@ -187,8 +187,11 @@ class OptimalDecoder(Decoder):
         net.decoder_matrix += s.eta_decoder * dD
 
     def sparsify_decoder(self, net, s):
-        sum_over_i = np.sum(D, axis=0)
-
+        sum_over_inputs = np.sum(net.decoder_matrix, axis=0)
+        threshold = s.decoder_pruning_level * sum_over_inputs
+        # for each neuron set decoder weights to zero according to pruning level
+        for j in range(net.decoder_matrix.shape[1]):
+            net.decoder_matrix[net.decoder_matrix[:, j] < threshold[j], j] = 0 
 
 
 class OptimalDecoderEfficient(Decoder):
@@ -380,6 +383,7 @@ class Log():
         snapshot["spikes"] = np.zeros((n_intervals, net.n_neuron), dtype=bool)
         snapshot["inputs"] = test_inputs
         snapshot["s"] = s
+        snapshot["decoder_feedforward_overlap"] = - np.sum(np.diag(net.recurrent_weights))
         neuron_spikes = np.zeros((net.n_neuron), dtype=bool)
         for t in range(n_steps):
             x = select_input(test_inputs, t, s)
@@ -437,6 +441,8 @@ class Settings():
         self.input_selector = None
         self.n_test_repeat = 0
         self.n_train_repeat = 0
+        self.input_noise = False
+        self.noise_level = 10
 
         ## Network architecture
         self.n_stim = np.nan
@@ -462,9 +468,9 @@ class Settings():
         self.update_interval = 5  ## update interval (ms) that batch updates are processed in
 
         ## NN plasticity learning settings
-        self.eta_feedforward = 0.00006 # 1/ms
-        self.eta_recurrent = 0.00006 #1/ms
-        self.eta_decoder = 0.0001 # 1/ms
+        self.eta_feedforward = 0.00005 # 1/ms
+        self.eta_recurrent = 0.00005 #1/ms
+        self.eta_decoder = 0.00005 # 1/ms
         self.eta_bias = 0.00001 # 1/ms
 
         ## Sigma annealing

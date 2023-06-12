@@ -15,10 +15,10 @@ plotting = reload(plotting)
 #%% 
 ## Parameters of the run
 ## Odors maxed, ORN and Neurons as measured
-n_odor = 34
+n_odor = 10
 n_ORN = 21
 n_neuron = 54
-n_train_odor_repeats = 100 ## need 500 to learn fully generally
+n_train_odor_repeats = 50 ## need 500 to learn fully generally
 n_test_odor_repeats = 20 ## each odor presented x times
 presentation_length = 500 #ms
 dt = 0.5 #ms
@@ -52,6 +52,9 @@ s.set('dynamic_sample_interval', 5)
 s.set('dynamic_log_test_set', n_odor*2)
 s.set('n_train_repeat', n_train_odor_repeats)
 s.set('n_test_repeat', n_test_odor_repeats)
+s.eta_bias = 0.0005
+s.eta_decoder = 0.00005
+s.input_noise = True # Attempt to make firing more decoupled by introducing noise
 ## Since presentation length increased 10-fold, need to also change learning rates to decrease 10+-fold
 s.input_selector = get_odor_rate
 s.odor_file = odor_file
@@ -92,8 +95,6 @@ if False:
 #%%
 meas = SomaticNet(s)
 s.project_name = project_name + "_meas"
-s.eta_bias = 0.0005
-s.eta_decoder = 0.00005
 meas_file = path + "connectivity_data/PN_KC_Meas_left.csv"
 meas_feed = read_meas_connectivity(meas_file)/10
 meas.feedforward_weights = meas_feed
